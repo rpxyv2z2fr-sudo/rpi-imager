@@ -93,7 +93,9 @@ QByteArray CustomisationGenerator::generateSystemdScript(const QVariantMap& s, c
         const QStringList lines = sshAuthorizedKeys.split(QRegularExpression("\r?\n"), Qt::SkipEmptyParts);
         for (const QString& k : lines) keyList.append(k.trimmed());
     } else if (!sshPublicKey.isEmpty()) {
-        keyList.append(sshPublicKey);
+        // Split sshPublicKey by newlines to handle .pub files with multiple keys
+        const QStringList lines = sshPublicKey.split(QRegularExpression("\r?\n"), Qt::SkipEmptyParts);
+        for (const QString& k : lines) keyList.append(k.trimmed());
     }
     QString pubkeyArgs;
     for (const QString& k : keyList) {
@@ -324,6 +326,8 @@ QByteArray CustomisationGenerator::generateCloudInitUserData(const QVariantMap& 
     if (!hostname.isEmpty()) {
         push(QStringLiteral("hostname: ") + hostname, cloud);
         push(QStringLiteral("manage_etc_hosts: true"), cloud);
+        // Allow local hostname changes after first boot (don't let cloud-init overwrite)
+        push(QStringLiteral("preserve_hostname: true"), cloud);
         // Parity with legacy QML: install avahi-daemon and disable apt Check-Date on first boot
         push(QStringLiteral("packages:"), cloud);
         push(QStringLiteral("- avahi-daemon"), cloud);
@@ -385,7 +389,11 @@ QByteArray CustomisationGenerator::generateCloudInitUserData(const QVariantMap& 
                         push(QStringLiteral("    - ") + k.trimmed(), cloud);
                     }
                 } else {
-                    push(QStringLiteral("    - ") + sshPublicKey, cloud);
+                    // Split sshPublicKey by newlines to handle .pub files with multiple keys
+                    const QStringList keys = sshPublicKey.split(QRegularExpression("\r?\n"), Qt::SkipEmptyParts);
+                    for (const QString& k : keys) {
+                        push(QStringLiteral("    - ") + k.trimmed(), cloud);
+                    }
                 }
                 push(QStringLiteral("  sudo: ALL=(ALL) NOPASSWD:ALL"), cloud);
             }
@@ -394,6 +402,9 @@ QByteArray CustomisationGenerator::generateCloudInitUserData(const QVariantMap& 
         
         if (sshPasswordAuth) {
             push(QStringLiteral("ssh_pwauth: true"), cloud);
+        } else if (!sshAuthorizedKeys.isEmpty() || !sshPublicKey.isEmpty()) {
+            // Explicitly disable password authentication when using public-key auth
+            push(QStringLiteral("ssh_pwauth: false"), cloud);
         }
     }
     
